@@ -21,6 +21,19 @@
 - 5 кнопок управления
 - Литий-ионный аккумулятор
 
+## [МОЖНО ПРОШИТЬ ESP32 НА МОЁМ САЙТЕ](https://catdevcode.github.io/CatOs_webflasher/)
+
+## Простой для DIY
+1. Схема подключения
+
+![scheme_CATOS](https://github.com/CatDevCode/CatOs/blob/main/assets/sheme_catos.png)
+
+2. Схема питания
+
+![scheme_bat_CATOS](https://github.com/CatDevCode/CatOs/blob/main/assets/bat.png)
+
+> [!TIP]
+> Резисторы на 100 kOm
 ## PCB
 - Ссылка на проект [EasyEDA](https://oshwlab.com/oleggator2013/catos_catdevcode)
 ![PCB1](assets/pcb1.jpg)
