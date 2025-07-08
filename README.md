@@ -93,5 +93,15 @@ pio run --target upload
 ## Кредиты
 - Спасибо [Алексу Гайверу](https://github.com/GyverLibs/) за библиотеки ❤
 - Спасибо проекту [MicroReader](https://github.com/Nich1con/microReader/) за некоторые функции и игры.
+## Star History
+
+<a href="https://www.star-history.com/#CatDevCode/CatOs&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=CatDevCode/CatOs&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=CatDevCode/CatOs&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=CatDevCode/CatOs&type=Date" />
+ </picture>
+</a>
+
 ## Проект открыт для Pull-реквестов
 ## Сделано с любовью ❤
