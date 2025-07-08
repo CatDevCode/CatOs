@@ -1,4 +1,4 @@
-#define FIRMWARE_VERSION "v0.1.2D"
+#define FIRMWARE_VERSION "v0.1.2R"
 // настройка дисплей
 #define RES 17
 #define DC 16
@@ -3357,7 +3357,7 @@ void Utilities_menu() {
     "Таймер",
     "Управление GPIO",
     "Выход"
-};
+  };
   const uint8_t settings_apps_count = sizeof(settings_items)/sizeof(settings_items[0]);
   int8_t settings_apps_ptr = 0;
   const uint8_t header_height = 16; // Высота заголовка с линией
