@@ -1,4 +1,4 @@
-#define FIRMWARE_VERSION "v0.1.2R"
+#define FIRMWARE_VERSION "v0.1.3D"
 // настройка дисплей
 #define RES 17
 #define DC 16
@@ -241,11 +241,11 @@ void startAP() {
  
   if (ssid.length() == 0) {
       ssid = "CatOs";
-      db[kk::AP_SSID] = ssid; // Исправлено на AP_SSID
+      db[kk::AP_SSID] = ssid;
   }
   if (pass.length() < 8) {
       pass = "12345678";
-      db[kk::AP_PASS] = pass; // Исправлено на AP_PASS
+      db[kk::AP_PASS] = pass;
   }
   WiFi.softAP(
     db[kk::AP_SSID].toString().c_str(),
@@ -748,6 +748,33 @@ uint32_t generateSeed() {
     seed ^= analogRead(27);
     return seed;
 }
+uint8_t parseHFile(uint8_t *img, File &file) {
+  int imgLen = 0;
+  memset(img, 0, 1024); // Очистка буфера
+
+  // Пропускаем все символы до '{'
+  while (file.available()) {
+    if (file.read() == '{') break;
+  }
+
+  // Читаем данные до '}' или конца файла
+  while (file.available() && imgLen < 1024) {
+    char c = file.read();
+    if (c == '}') break; // Конец данных
+    
+    // Парсим HEX-значения вида 0xXX
+    if (c == '0' && file.peek() == 'x') {
+      file.read(); // Пропускаем 'x'
+      char hex[3] = {0};
+      hex[0] = file.read();
+      hex[1] = file.read();
+      img[imgLen++] = strtoul(hex, NULL, 16); // Конвертируем HEX в байт
+    }
+    yield(); // Для стабильности ESP
+  }
+
+  return (imgLen == 1024) ? 0 : 1; // 0 = успех, 1 = ошибка
+}
 void setup() {
     Serial.begin(115200);
     oled.init(); 
@@ -769,9 +796,46 @@ void setup() {
 
     // Применяем настройки
     oled.setContrast(db[kk::OLED_BRIGHTNESS].toInt());
+        
+    // Проверка наличия кастомного логотипа
+    bool customLogoLoaded = false;
+    if (LittleFS.exists("/custom_catos.h")) {
+        customLogoLoaded = true;
+        
+        // Пытаемся загрузить кастомный логотип
+        File file = LittleFS.open("/custom_catos.h", "r");
+        if (file) {
+            uint8_t *img = new uint8_t[1024];
+            if (parseHFile(img, file) == 0) { // Успешный парсинг
+                oled.clear();
+                oled.drawBitmap(0, 0, img, 128, 64);
+                oled.update();
+                delete[] img;
+                
+                // Ожидание с возможностью прерывания
+                uint32_t tmr = millis();
+                while (millis() - tmr < 2000) {
+                    ok.tick();
+                    if (ok.isClick()) {
+                        file.close();
+                        servmode();
+                        return;
+                    }
+                    delay(10);
+                }
+            } else {
+                delete[] img;
+                customLogoLoaded = false;
+            }
+            file.close();
+        }
+    }
     // Если во время показа логотипа нажали OK - войти в сервисный режим
-    if (draw_logo()) {
-      servmode();
+    // Если кастомный логотип не загружен - стандартный экран
+    if (!customLogoLoaded) {
+      if (draw_logo()) {
+        servmode();
+      }
     }
     drawStaticMenu();
     updatePointer();
@@ -1695,33 +1759,6 @@ bool drawMainMenu(void) {                           // Отрисовка гла
 }
 /* ======================================================================= */
 /* ============================ Чтение файла ============================= */
-uint8_t parseHFile(uint8_t *img, File &file) {
-  int imgLen = 0;
-  memset(img, 0, 1024); // Очистка буфера
-
-  // Пропускаем все символы до '{'
-  while (file.available()) {
-    if (file.read() == '{') break;
-  }
-
-  // Читаем данные до '}' или конца файла
-  while (file.available() && imgLen < 1024) {
-    char c = file.read();
-    if (c == '}') break; // Конец данных
-    
-    // Парсим HEX-значения вида 0xXX
-    if (c == '0' && file.peek() == 'x') {
-      file.read(); // Пропускаем 'x'
-      char hex[3] = {0};
-      hex[0] = file.read();
-      hex[1] = file.read();
-      img[imgLen++] = strtoul(hex, NULL, 16); // Конвертируем HEX в байт
-    }
-    yield(); // Для стабильности ESP
-  }
-
-  return (imgLen == 1024) ? 0 : 1; // 0 = успех, 1 = ошибка
-}
 void enterToReadBmpFile(String filename) {
   File file = LittleFS.open(filename, "r");
   if (!file) {
