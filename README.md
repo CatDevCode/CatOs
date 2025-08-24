@@ -39,7 +39,9 @@
 ![PCB1](assets/pcb1.jpg)
 ![PCB2](assets/pcb2.jpg)
 ![PCB3](assets/pcb_with_components.jpg)
-
+> [!WARNING]
+> При прошивке / зарядке устройства отключите питание
+> от батареи переключателем.
 ## Создание изображений и загрузка
 1. Запустите [imageProcessor.exe](https://github.com/AlexGyver/imageProcessor) (установите java)
 
@@ -105,3 +107,4 @@ pio run --target upload
 
 ## Проект открыт для Pull-реквестов
 ## Сделано с любовью ❤
+
