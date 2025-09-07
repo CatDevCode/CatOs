@@ -1,5 +1,5 @@
-#define FIRMWARE_VERSION "v0.1.3D"
-// настройка дисплей
+#define FIRMWARE_VERSION "v0.1.3R"
+// настройка дисплея
 #define RES 17
 #define DC 16
 #define CS 5
@@ -46,10 +46,12 @@ bool isdraw;
 #define DINO_GRAVITY  0.195f// Значение гравитации динозавра
 #define DINO_GAME_FPS 30    // Скорость обновления дисплея
 //----------------------------
+bool flag_pin_free = false;
+bool flag_pin_built_in = false;
 //читалка
 byte cursor = 0;            // Указатель (курсор) меню
 byte files = 0;             // Количество файлов
-const int MAX_PAGE_HISTORY = 150;
+const int MAX_PAGE_HISTORY = 150;         // сколько страниц может отображать читалка(можно изменить). но, если очень много указать, то может крашнутся esp32
 long pageHistory[MAX_PAGE_HISTORY] = {0};
 int currentHistoryIndex = -1;
 int totalPages = 0;
@@ -58,19 +60,21 @@ int totalPages = 0;
 #define REF_VOLTAGE     3.3 // Опорное напряжение ADC (3.3V для ESP32)
 #define ADC_RESOLUTION  12  // 12 бит (0-4095)
 #define VOLTAGE_DIVIDER 2.0
-// Напряжения для расчета процента заряда (калибровка под ваш аккумулятор). Настройки в serv меню
+// Напряжения для расчета процента заряда (калибровка под ваш аккумулятор). Настройки в serv меню без перепрошивки
 #define BAT_NOMINAL_VOLTAGE 3.7 // Номинальное напряжение (3.7V)
 #define BATTERY_PIN        34   // GPIO34 (ADC1_CH6) для измерения напряжения
 float batteryVoltage = 0;
 int batteryPercentage = 0;
 //----------------------------------
 //объекты
-GyverOLED<SSD1306_128x64, OLED_BUFFER, OLED_SPI, CS, DC, RES> oled;
+GyverOLED<SSD1306_128x64, OLED_BUFFER, OLED_SPI, CS, DC, RES> oled; //дисплей
+// кнопки
 GButton up(UP_PIN);
 GButton down(DOWN_PIN);
 GButton right(RIGHT_PIN);
 GButton left(LEFT_PIN);
-GButton ok(OK_PIN);                                  
+GButton ok(OK_PIN);  
+//------------------                                
 GyverDBFile db(&LittleFS, "/data.db");              //файл где хранятся настройки
 SettingsGyver sett("CatOS " FIRMWARE_VERSION, &db); // веб морда
 Random16 rnd;                                       // рандом
@@ -81,7 +85,7 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 //------------------------
-// кей
+// ключи для веб морды (сохранение настроек и т.д.)
 DB_KEYS(
   kk,
   OLED_BRIGHTNESS,
@@ -160,7 +164,7 @@ String constrainString(String str, uint8_t minLen, uint8_t maxLen) {
   }
   return str;
 }
-String getChipID() {
+String getChipID() { // генерация фейк серинового номера
   uint64_t chipid = ESP.getEfuseMac();
   char sn[17];
   snprintf(sn, sizeof(sn), "%04X%08X", 
@@ -259,7 +263,7 @@ void stopWiFi() {
   Serial.println("WiFi completely stopped");
 }
 //----------
-void build(sets::Builder& b) {
+void build(sets::Builder& b) { // страница веб морды
   // Секция настроек дисплея
   {
       sets::Group g(b, "Дисплей");
@@ -301,7 +305,7 @@ void build(sets::Builder& b) {
   }
 }
 
-// Новая функция инициализации настроек
+// Новая функция инициализации настроек (проверяет есть ли в ключах значение)
 void initSettings() {
   // Существующие настройки
   if (!db.has(kk::OLED_BRIGHTNESS)) db.init(kk::OLED_BRIGHTNESS, 128);
@@ -374,19 +378,14 @@ void buttons_tick() {
   left.tick();
   ok.tick();
 }
-void exit() {
+void exit(bool with_update = true) {
   oled.clear();
   resetButtons();
   oled.setScale(1);
-  drawStaticMenu();
-  updatePointer();
-  drawbattery();
-  oled.update();
-}
-void exit_without_update() {
-  oled.clear();
-  resetButtons();
-  oled.setScale(1);
+  if (with_update) {
+    drawStaticMenu();
+    updatePointer();
+  }
   drawbattery();
   oled.update();
 }
@@ -415,6 +414,7 @@ bool draw_logo() {
   oled.update();
   return btn_pressed;
 }
+//старый тест % батареи. используйте новый
 //void testBattery() {
 //  oled.clear();
 //  while (true) {
@@ -453,7 +453,7 @@ bool draw_logo() {
 //  }
 //}
 void testBattery() {
-  ui_rama("Версия " FIRMWARE_VERSION, true, true, true);
+  ui_rama("CatOS " FIRMWARE_VERSION, true, true, true);
   float bat_min = db[kk::BAT_MIN_VOLTAGE].toFloat();
   float bat_max = db[kk::BAT_MAX_VOLTAGE].toFloat();
   while (true) {
@@ -518,7 +518,7 @@ void testBattery() {
 //}
 void sysInfo() {
   oled.autoPrintln(true);
-  ui_rama("Версия " FIRMWARE_VERSION, true, true, true);
+  ui_rama("CatOS " FIRMWARE_VERSION, true, true, true);
   oled.setCursor(0,2);
   oled.printf("Опиративка: %d \n", ESP.getFreeHeap());
   oled.setCursor(0,3);
@@ -659,7 +659,7 @@ void batteryCalibration() {
       if(left.isClick()) *current_val -= 0.01;
       
       // Ограничения
-      *current_val = constrain(*current_val, 2.0, 4.2);
+      *current_val = constrain(*current_val, 2.0, 4.9);
     }
     
     // Выход по удержанию
@@ -686,7 +686,7 @@ void servmode() {
   int8_t serv_apps_ptr = 0;
   const uint8_t header_height = 16; // Высота заголовка с линией
 
-  ui_rama("Версия " FIRMWARE_VERSION, true, true, true);
+  ui_rama("CatOS " FIRMWARE_VERSION, true, true, true);
   
   while(true) {
     static uint32_t timer = 0;
@@ -736,7 +736,7 @@ void servmode() {
         case 5: ESP.restart(); // Выход
       }
       // Перерисовываем интерфейс после возврата
-      ui_rama("Версия " FIRMWARE_VERSION, true, true, true);
+      ui_rama("CatOS " FIRMWARE_VERSION, true, true, true);
     }
   }
 }
@@ -840,6 +840,7 @@ void setup() {
     drawStaticMenu();
     updatePointer();
     pinMode(FREE_PIN, OUTPUT);
+    pinMode(2, OUTPUT);
     uint32_t seed = generateSeed();
     rnd.setSeed(seed);
     randomSeed(seed);
@@ -930,7 +931,7 @@ void snake() {
 
     // Выход
     if (ok.isHold()){
-      exit_without_update();
+      exit(false);
       return;
     }  
 }
@@ -962,7 +963,7 @@ startDinoGame:                         // Начало игры
       down.setTimeout(300);
       ok.setTimeout(300);
       ok.setStepTimeout(400);
-      exit_without_update();
+      exit(false);
       return;
     }                               
 
@@ -1069,7 +1070,7 @@ startDinoGame:                         // Начало игры
               down.setTimeout(300);
               ok.setTimeout(300);
               ok.setStepTimeout(400);
-              exit_without_update();
+              exit(false);
               return;
             }                                                            // Нажали на левую - вернулись в меню                                                                          // Уходим в сон по необходимости
             }
@@ -1087,54 +1088,122 @@ startDinoGame:                         // Начало игры
     }
 }
 
-
-
-
-
-
-void power_high() {
-  resetButtons();
-  oled.clear();
-  ui_rama("Управление GPIO", true, true, true);
-  oled.setCursor(0,2);
-  oled.print("Питание на пине:");
-  oled.setCursor(0,3);
-  oled.print(FREE_PIN);
-  oled.update();
-
-  while(true) {
-    buttons_tick();
-    if(up.isClick()) {
-      digitalWrite(FREE_PIN, HIGH);
-      resetButtons();
-      oled.clear();
-      ui_rama("Управление GPIO", true, true, true);
-      oled.setCursor(0,2);
-      oled.print("Питание на пине:");
-      oled.setCursor(0,3);
-      oled.print(FREE_PIN);
-      oled.setCursor(0,5);
-      oled.print("Включено!");
-      oled.update();
+void control_gpio(bool pin) { // 0(false) - Встроенный (синий), 1(true) - Свободный FREE_PIN. Так сделанно для экономии пямяти
+  String free_pin_str = "Управ. " + String(FREE_PIN) + " пином";
+  if(pin) {
+    ui_rama(free_pin_str.c_str(), true, true, true);
+    oled.setScale(4);
+    oled.setCursor(0,2);
+    if (!flag_pin_free){
+      oled.print("ВЫКЛ");
+    } else {
+      oled.print("ВКЛ ");
     }
-    if(down.isClick()){
-      digitalWrite(FREE_PIN, LOW);
-      resetButtons();
-      oled.clear();
-      ui_rama("Управление GPIO", true, true, true);
-      oled.setCursor(0,2);
-      oled.print("Питание на пине:");
-      oled.setCursor(0,3);
-      oled.print(FREE_PIN);
-      oled.setCursor(0,5);
-      oled.print("Выключенно!");
-      oled.update();
+    oled.update();
+    while (true)
+    {
+      buttons_tick();
+      if (ok.isClick()) {
+        flag_pin_free = !flag_pin_free;
+        oled.setScale(4);
+        oled.setCursor(0,2);
+        if (!flag_pin_free){
+          digitalWrite(FREE_PIN, LOW);
+          oled.print("ВЫКЛ");
+        } else {
+          digitalWrite(FREE_PIN, HIGH);
+          oled.print("ВКЛ ");
+        }
+        oled.update();
+      }
+      if (ok.isHold()){
+        exit(false);
+        return;
+      }
+    }
+  } else {
+    ui_rama("Управ. встр. пин.", true, true, true); 
+    oled.setScale(4);
+    oled.setCursor(0,2);
+    if (!flag_pin_built_in){
+      oled.print("ВЫКЛ");
+    } else {
+      oled.print("ВКЛ ");
+    }
+    oled.update();
+    while (true)
+    {
+      buttons_tick();
+      if (ok.isClick()) {
+        flag_pin_built_in = !flag_pin_built_in;
+        oled.setScale(4);
+        oled.setCursor(0,2);
+        if (!flag_pin_built_in){
+          digitalWrite(2, LOW);
+          oled.print("ВЫКЛ");
+        } else {
+          digitalWrite(2, HIGH);
+          oled.print("ВКЛ ");
+        }
+        oled.update();
+      }
+      if (ok.isHold()){
+        exit(false);
+        return;
+      }
+    }
+  }
+}
+
+void choice_gpio() {
+  String free_pin_str = "Свободный (" + String(FREE_PIN) + ")";
+  const char* choice_gpio_items[] = {
+    "Встроенный (синий)",
+    free_pin_str.c_str(),
+    "Выход"
+  };
+  const uint8_t choice_gpio_count = sizeof(choice_gpio_items)/sizeof(choice_gpio_items[0]);
+  int8_t choice_gpio_ptr = 0;
+  const uint8_t header_height = 16; // Высота заголовка с линией
+
+  ui_rama("Выбор GPIO", true, true, true);  
+  while(true) {
+    // Очищаем только область меню (начиная с 3 строки)
+    oled.clear(0, header_height, 127, 63);
+    
+    // Рисуем только первый видимый пункт
+    oled.setCursor(2, header_height/8 + 0); // 3 строка (16px)
+    oled.print(choice_gpio_ptr == 0 ? ">" : " ");
+    oled.print(choice_gpio_items[0]);
+
+    // Рисуем остальные пункты если есть
+    if(choice_gpio_count > 1) {
+      for(uint8_t i = 1; i < choice_gpio_count; i++) {
+        oled.setCursor(2, header_height/8 + i); // Следующие строки
+        oled.print(choice_gpio_ptr == i ? ">" : " ");
+        oled.print(choice_gpio_items[i]);
+      }
+    }
+    
+    oled.update();
+
+    buttons_tick();
+
+    if(up.isClick() && choice_gpio_ptr > 0) {
+      choice_gpio_ptr--;
+    }
+    if(down.isClick() && choice_gpio_ptr < choice_gpio_count - 1) {
+      choice_gpio_ptr++;
     }
     if(ok.isClick()) {
-      exit_without_update();
-      return;
+      switch(choice_gpio_ptr) {
+        case 0: control_gpio(false); break;
+        case 1: control_gpio(true); break;
+        case 2: exit(false); return;
+      }
+      // Перерисовываем интерфейс после возврата
+      ui_rama("Выбор GPIO", true, true, true);
     }
-
   }
 }
 int64_t _pow(int64_t a, int64_t b) {
@@ -1649,7 +1718,7 @@ void playTetrisGame() {
     oled.setCursor(0, 0); oled.print("ТЕТРИС");                                                                    // Выводим рекорд
     if (ok.isHold()) {
       lineCleanCounter = 0;
-      exit_without_update();
+      exit(false);
       break;
     }
     tetrisRoutine();
@@ -2287,7 +2356,7 @@ void runCatosApp(String filename) {
   return;
 }
 void enterToReadFile(void) { 
-  setCpuFrequencyMhz(240);
+
   String filename = getFilenameByIndex(cursor);
   if (filename.endsWith(".h")) {
     enterToReadBmpFile(filename);
@@ -2305,25 +2374,21 @@ void ShowFilesLittleFS() {
     exit();
     setCpuFrequencyMhz(80);
     return;
-  }        
-  setCpuFrequencyMhz(80);          
+  }                 
   while (true)
   {
     buttons_tick();                                     // Опрос кнопок
     static uint32_t timer = 0;                          // таймер
     if (up.isClick() || (up.isHold() && millis() - timer > 50)) {                // Если нажата или удержана кнопка вверх
-      setCpuFrequencyMhz(240);
       cursor = constrain(cursor - 1, 0, files - 1);   // Двигаем курсор
       timer = millis();
       update_cursor();    
-      setCpuFrequencyMhz(80);
     } else if (down.isClick() || (down.isHold() && millis() - timer > 50)) {       // Если нажата или удержана кнопка вниз
-      setCpuFrequencyMhz(240);
       cursor = constrain(cursor + 1, 0, files - 1);   // Двигаем курсор
       timer = millis();
       update_cursor();                                 // Обновляем главное меню
-      setCpuFrequencyMhz(80);
     } else if (ok.isHold()) {                         // Если удержана ОК
+      setCpuFrequencyMhz(80);
       exit();                                         // Выход                        
       return;                                         // Выход
     } else if (ok.isClick()) {                        // Если нажата ОК
@@ -2393,7 +2458,7 @@ void dice_random() {
     }
     
     if(ok.isHold()) {
-      exit_without_update();
+      exit(false);
       return;
     }
   }
@@ -2455,7 +2520,7 @@ void stopwatch() {
       
       // Выход по долгому нажатию OK
       if(ok.isHold()) {
-          exit_without_update();
+          exit(false);
           return;
       }
   }
@@ -2597,7 +2662,7 @@ void timer_oled() {
       
       // Выход по долгому нажатию OK
       if(ok.isHold() && state != ALARM) {
-          exit_without_update();
+          exit(false);
           return;
       }
   }
@@ -2759,7 +2824,7 @@ void pongGame() {
           up.setTimeout(300);
           down.setTimeout(300);
           score1 = score2 = 0;
-          exit_without_update();
+          exit(false);
           return;
       }
       
@@ -2887,7 +2952,7 @@ void flappyGame() {
               gameOver = false;
             }
             if(left.isClick() || ok.isHold()) {
-              exit_without_update();
+              exit(false);
               return;
             }
           }
@@ -2896,7 +2961,7 @@ void flappyGame() {
       oled.update();
       
       if(left.isClick() || ok.isHold()) {
-          exit_without_update();
+          exit(false);
           return;
       }
       
@@ -3052,7 +3117,7 @@ void arkanoidGame() {
         
         // Выход из игры
         if (ok.isHold()) {
-            exit_without_update();
+            exit(false);
             left.setStepTimeout(400);
             right.setStepTimeout(400);
             return;
@@ -3100,7 +3165,7 @@ void arkanoidGame() {
             while (true) {
                 buttons_tick();
                 if (ok.isClick()) {
-                    exit_without_update();
+                    exit(false);
                     left.setStepTimeout(400);
                     right.setStepTimeout(400);
                     return;
@@ -3262,13 +3327,18 @@ void brightnessAdjust() {
       oled.print(brightness);
       oled.setCursor(0, 2);
       oled.print("OK - сохранить");
+      oled.setCursor(0, 4);
+      oled.print("Зажать OK - выход");
       oled.update();
 
       buttons_tick();
       
+      if(right.isClick()) brightness = constrain(brightness + 20, 0, 255); oled.setContrast(brightness);
+      if(left.isClick()) brightness = constrain(brightness - 20, 0, 255); oled.setContrast(brightness);      
       if(up.isClick()) brightness = constrain(brightness + 10, 0, 255); oled.setContrast(brightness);
       if(down.isClick()) brightness = constrain(brightness - 10, 0, 255); oled.setContrast(brightness);
       if(ok.isClick()) {
+          if (brightness == 0) brightness = 1;
           db[kk::OLED_BRIGHTNESS] = brightness;
           oled.setContrast(brightness);
           db[kk::OLED_BRIGHTNESS] = brightness;
@@ -3434,7 +3504,7 @@ void Utilities_menu() {
       switch(settings_apps_ptr) {
         case 0: stopwatch(); break;
         case 1: timer_oled(); break;
-        case 2: power_high(); break;
+        case 2: choice_gpio(); break;
         case 3: exit(); return;
       }
       // Перерисовываем интерфейс после возврата
