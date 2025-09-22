@@ -22,6 +22,7 @@
 #include "pong.h"           // понг
 #include "flappy_bird.h"    // птичка
 #include "arkanoid.h"       // арнакоид
+#include "space_invaders.h"
 // ------------------
 bool alert_f;               // показ ошибки в вебморде
 bool wifiConnected = false; // для wifi морды
@@ -46,8 +47,12 @@ bool isdraw;
 #define DINO_GRAVITY  0.195f// Значение гравитации динозавра
 #define DINO_GAME_FPS 30    // Скорость обновления дисплея
 //----------------------------
+// флаги
 bool flag_pin_free = false;
 bool flag_pin_built_in = false;
+//----------------------------
+// настройки
+bool settings_auto_bright;
 //читалка
 byte cursor = 0;            // Указатель (курсор) меню
 byte files = 0;             // Количество файлов
@@ -97,6 +102,7 @@ DB_KEYS(
   wifi_ssid,
   wifi_pass,
   serial_num,
+  auto_bright,
   apply
 );
 int getBattery() {
@@ -116,7 +122,7 @@ int getVoltage() {
 }
 void drawbattery() {
   int battery = getBattery(); // Обновляем заряд
-  if (battery <= 10){
+  if (battery <= 10 and settings_auto_bright){
     oled.setContrast(50);
   } else {
     oled.setContrast(db[kk::OLED_BRIGHTNESS].toInt());
@@ -327,7 +333,8 @@ void initSettings() {
   }
   if (!db.has(kk::wifi_ssid)) db.init(kk::wifi_ssid, "");
   if (!db.has(kk::wifi_pass)) db.init(kk::wifi_pass, "");
-  
+
+  if (!db.has(kk::auto_bright)) db.init(kk::auto_bright, false);
   db.update();
 }
 void drawStaticMenu() {
@@ -793,7 +800,7 @@ void setup() {
     
     // Инициализируем ключи с проверкой значений
     initSettings();
-
+    settings_auto_bright = db[kk::auto_bright].toBool();
     // Применяем настройки
     oled.setContrast(db[kk::OLED_BRIGHTNESS].toInt());
         
@@ -937,6 +944,628 @@ void snake() {
 }
 }
 
+// Space Invaders Game by VoltimeterXPayalnuk
+
+void spaceInvadersGame() {
+  resetButtons();
+  
+  // Переменные
+  bool _is_menu_rendered = false;
+  bool _is_difficulty_rendered = false;
+  bool _is_game_started = false;
+  unsigned long _last_time = millis();
+  bool _game_over_anim = false;
+  int _gamemode = GAMEMODE_CLASSIC;
+  int _state = INVADERS_STATE_MENU;
+  int _score = 0;
+  int _lives = 3;
+  int _player_x = (DISPLAY_WIDTH - PLAYER_WIDTH) / 2;
+  unsigned long _enemy_spawn_time = millis();
+  unsigned long _game_over_time = 0;
+  
+  // Настройка скорости игрока (можно менять от 1 до 5)
+  int playerSpeed = 1;
+  
+  // Таймер для звезд (30 FPS)
+  unsigned long starsLastUpdate = 0;
+  const uint8_t starsInterval = 33; // 30 FPS в мс
+
+  // Структуры
+  struct Star {
+    int x, y, brightness;
+  };
+  struct Bullet {
+    float x, y;
+    bool active;
+  };
+  struct EnemyBullet {
+    float x, y;
+    bool active;
+  };
+  struct Enemy {
+    float x, y;
+    bool active;
+    float vx, vy;
+    unsigned long last_shot_time;
+  };
+  
+  // Массивы
+  Star _stars[MAX_STARS];
+  Bullet _bullets[MAX_BULLETS];
+  EnemyBullet _enemy_bullets[MAX_ENEMY_BULLETS];
+  Enemy _enemies[MAX_ENEMIES];
+  
+  // Инициализация звезд
+  for (int i = 0; i < MAX_STARS; i++) {
+    _stars[i].x = random(0, DISPLAY_WIDTH);
+    _stars[i].y = random(0, DISPLAY_HEIGHT);
+    _stars[i].brightness = random(0, 3);
+  }
+  
+  // Инициализация массивов
+  for (int i = 0; i < MAX_BULLETS; i++) _bullets[i].active = false;
+  for (int i = 0; i < MAX_ENEMIES; i++) _enemies[i].active = false;
+  for (int i = 0; i < MAX_ENEMY_BULLETS; i++) _enemy_bullets[i].active = false;
+  
+  // Создание начальных врагов
+  int initialEnemies = _gamemode == GAMEMODE_CLASSIC ? 3 : 5;
+  for (int i = 0; i < initialEnemies; i++) {
+    for (int j = 0; j < MAX_ENEMIES; j++) {
+      if (!_enemies[j].active) {
+        _enemies[j].x = random(0, DISPLAY_WIDTH - ENEMY_WIDTH);
+        _enemies[j].y = 0;
+        _enemies[j].active = true;
+        _enemies[j].vx = (random(0, 2) ? 0 : (random(0, 2) * 2 - 1) * 0.3);
+        _enemies[j].vy = (_gamemode == GAMEMODE_CLASSIC) ? 0 : 0.02;
+        _enemies[j].last_shot_time = millis();
+        break;
+      }
+    }
+  }
+  
+  // Главный цикл игры
+  while(true) {
+    buttons_tick();
+
+    // Обновление звезд с фиксированным интервалом
+    if (millis() - starsLastUpdate > starsInterval) {
+      starsLastUpdate = millis();
+      for (int i = 0; i < MAX_STARS; i++) {
+        _stars[i].y += (_stars[i].brightness + 1);
+        if (_stars[i].y >= DISPLAY_HEIGHT) {
+          _stars[i].y = 0;
+          _stars[i].x = random(0, DISPLAY_WIDTH);
+          _stars[i].brightness = random(0, 3);
+        }
+      }
+    }
+
+    switch (_state) {
+      case INVADERS_STATE_MENU: {
+        if (!_is_menu_rendered) {
+          oled.clear();
+          
+          // Отрисовка звезд
+          for (int i = 0; i < MAX_STARS; i++) {
+            if (_stars[i].brightness == 0) oled.dot(_stars[i].x, _stars[i].y);
+            else if (_stars[i].brightness == 1) {
+              oled.dot(_stars[i].x, _stars[i].y);
+              oled.dot(_stars[i].x + 1, _stars[i].y);
+              oled.dot(_stars[i].x, _stars[i].y + 1);
+              oled.dot(_stars[i].x + 1, _stars[i].y + 1);
+            } else {
+              oled.rect(_stars[i].x, _stars[i].y, _stars[i].x + 1, _stars[i].y + 1, true);
+            }
+          }
+          
+          // Заголовок
+          oled.setScale(2);
+          oled.setCursorXY((DISPLAY_WIDTH - 12*6) / 2, 10);
+          oled.print(F("SPACE"));
+          oled.setCursorXY((DISPLAY_WIDTH - 12*6) / 2, 30);
+          oled.print(F("INVADERS"));
+          
+          // Отрисовка корабля и врагов
+          int playerX = DISPLAY_WIDTH/2 - PLAYER_WIDTH/2;
+          int playerY = 48;
+          oled.line(playerX + PLAYER_WIDTH/2, playerY, playerX, playerY + PLAYER_HEIGHT);
+          oled.line(playerX + PLAYER_WIDTH/2, playerY, playerX + PLAYER_WIDTH, playerY + PLAYER_HEIGHT);
+          oled.line(playerX, playerY + PLAYER_HEIGHT, playerX + PLAYER_WIDTH, playerY + PLAYER_HEIGHT);
+          oled.rect(playerX + 2, playerY + PLAYER_HEIGHT - 3, playerX + PLAYER_WIDTH - 2, playerY + PLAYER_HEIGHT, true);
+          
+          // Враги
+          oled.rect(20 + 2, 50, 20 + ENEMY_WIDTH - 2, 50 + 2, true);
+          oled.line(20, 50 + 2, 20 + ENEMY_WIDTH, 50 + 2);
+          oled.rect(20, 50 + 3, 20 + ENEMY_WIDTH, 50 + ENEMY_HEIGHT - 2, true);
+          
+          oled.rect(DISPLAY_WIDTH - 20 - ENEMY_WIDTH + 2, 50, DISPLAY_WIDTH - 20 - 2, 50 + 2, true);
+          oled.line(DISPLAY_WIDTH - 20 - ENEMY_WIDTH, 50 + 2, DISPLAY_WIDTH - 20, 50 + 2);
+          oled.rect(DISPLAY_WIDTH - 20 - ENEMY_WIDTH, 50 + 3, DISPLAY_WIDTH - 20, 50 + ENEMY_HEIGHT - 2, true);
+          
+          // Инструкции
+          oled.setScale(1);
+          oled.setCursor(0, 5);
+          oled.print(F("OK:START"));
+          oled.setCursor(80, 5);
+          oled.print(F("UP:EXIT"));
+          
+          oled.update();
+          _is_menu_rendered = true;
+        }
+        
+        if (ok.isClick() || down.isClick()) {
+          _state = INVADERS_STATE_DIFFICULTY;
+          _is_difficulty_rendered = false;
+        } else if (up.isClick()) {
+          resetButtons();
+          return;
+        }
+        break;
+      }
+        
+      case INVADERS_STATE_DIFFICULTY: {
+        if (!_is_difficulty_rendered) {
+          oled.clear();
+          
+          // Отрисовка звезд
+          for (int i = 0; i < MAX_STARS; i++) {
+            if (_stars[i].brightness == 0) oled.dot(_stars[i].x, _stars[i].y);
+            else if (_stars[i].brightness == 1) {
+              oled.dot(_stars[i].x, _stars[i].y);
+              oled.dot(_stars[i].x + 1, _stars[i].y);
+              oled.dot(_stars[i].x, _stars[i].y + 1);
+              oled.dot(_stars[i].x + 1, _stars[i].y + 1);
+            } else {
+              oled.rect(_stars[i].x, _stars[i].y, _stars[i].x + 1, _stars[i].y + 1, true);
+            }
+          }
+          
+          oled.setScale(2);
+          oled.setCursorXY((DISPLAY_WIDTH - 12*6) / 2, 10);
+          oled.print(F("GAME"));
+          oled.setCursorXY((DISPLAY_WIDTH - 8*6) / 2, 25);
+          oled.print(F("MODE"));
+          
+          oled.setScale(1);
+          
+          // Опция "Классический режим"
+          int classicY = 50;
+          oled.setCursorXY((DISPLAY_WIDTH - 8*6) / 2, classicY);
+          oled.print(_gamemode == GAMEMODE_CLASSIC ? F("> CLASSIC") : F("> CLASSIC"));
+          
+          
+          // Инструкция
+          oled.setCursor(15, 5);
+          oled.print(F("OK:SELECT  UP:BACK"));
+          
+          oled.update();
+          _is_difficulty_rendered = true;
+        }
+        
+        
+        if (ok.isClick()) {
+          // Сброс игры
+          _score = 0;
+          _lives = 3;
+          _player_x = (DISPLAY_WIDTH - PLAYER_WIDTH) / 2;
+          _game_over_anim = false;
+          _enemy_spawn_time = millis();
+          
+          for (int i = 0; i < MAX_BULLETS; i++) _bullets[i].active = false;
+          for (int i = 0; i < MAX_ENEMIES; i++) _enemies[i].active = false;
+          if (_gamemode == GAMEMODE_EXTREME) {
+            for (int i = 0; i < MAX_ENEMY_BULLETS; i++) _enemy_bullets[i].active = false;
+          }
+          
+          // Создание начальных врагов
+          int initialEnemies = _gamemode == GAMEMODE_CLASSIC ? 3 : 5;
+          for (int i = 0; i < initialEnemies; i++) {
+            for (int j = 0; j < MAX_ENEMIES; j++) {
+              if (!_enemies[j].active) {
+                if (_gamemode == GAMEMODE_CLASSIC) {
+                  _enemies[j].x = random(0, DISPLAY_WIDTH - ENEMY_WIDTH);
+                  _enemies[j].y = 0;
+                  _enemies[j].active = true;
+                  _enemies[j].vx = (random(0, 2) ? 0 : (random(0, 2) * 2 - 1) * 0.3);
+                  _enemies[j].vy = 0;
+                } else {
+                  _enemies[j].x = random(10, DISPLAY_WIDTH - ENEMY_WIDTH - 10);
+                  _enemies[j].y = random(5, 15);
+                  _enemies[j].active = true;
+                  _enemies[j].last_shot_time = millis();
+                  _enemies[j].vx = random(2) ? 0.3 : -0.3;
+                  _enemies[j].vy = 0.02;
+                }
+                break;
+              }
+            }
+          }
+          
+          _state = INVADERS_STATE_PLAYING;
+          _is_game_started = true;
+        } else if (up.isClick()) {
+          _state = INVADERS_STATE_MENU;
+          _is_menu_rendered = false;
+        }
+        break;
+      }
+        
+      case INVADERS_STATE_PLAYING: {
+        buttons_tick();
+    
+        // Управление - измененная скорость движения
+        if (left.state()) _player_x = constrain(_player_x - playerSpeed, 0, DISPLAY_WIDTH - PLAYER_WIDTH); delay(5);
+        if (right.state()) _player_x = constrain(_player_x + playerSpeed, 0, DISPLAY_WIDTH - PLAYER_WIDTH); delay(5);
+        
+        
+        // Стрельба
+        if (ok.isClick()) {
+          for (int i = 0; i < MAX_BULLETS; i++) {
+            if (!_bullets[i].active) {
+              _bullets[i].x = _player_x + PLAYER_WIDTH / 2;
+              _bullets[i].y = DISPLAY_HEIGHT - PLAYER_HEIGHT - 2;
+              _bullets[i].active = true;
+              break;
+            }
+          }
+        }
+        
+        // Выход из игры
+        if (up.isHold()) {
+          resetButtons();
+          return;
+        }
+
+        // Отрисовка
+        oled.clear();
+        
+        // Отрисовка звезд
+        for (int i = 0; i < MAX_STARS; i++) {
+          if (_stars[i].brightness == 0) oled.dot(_stars[i].x, _stars[i].y);
+          else if (_stars[i].brightness == 1) {
+            oled.dot(_stars[i].x, _stars[i].y);
+            oled.dot(_stars[i].x + 1, _stars[i].y);
+            oled.dot(_stars[i].x, _stars[i].y + 1);
+            oled.dot(_stars[i].x + 1, _stars[i].y + 1);
+          } else {
+            oled.rect(_stars[i].x, _stars[i].y, _stars[i].x + 1, _stars[i].y + 1, true);
+          }
+        }
+        
+        oled.setScale(1);
+        oled.setCursor(5, 0);
+        oled.print(F("Score:"));
+        oled.print(_score);
+        
+        oled.setCursor(80, 0);
+        oled.print(F("Lives:"));
+        oled.print(_lives);
+        
+        if (_gamemode == GAMEMODE_EXTREME) {
+          oled.setCursor(60, 0);
+          oled.print(F("X"));
+        }
+        
+        // Отрисовка врагов
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+          if (_enemies[i].active) {
+            int enemyX = _enemies[i].x;
+            int enemyY = _enemies[i].y;
+            oled.rect(enemyX + 2, enemyY, enemyX + ENEMY_WIDTH - 2, enemyY + 2, true);
+            oled.line(enemyX, enemyY + 2, enemyX + ENEMY_WIDTH, enemyY + 2);
+            oled.rect(enemyX, enemyY + 3, enemyX + ENEMY_WIDTH, enemyY + ENEMY_HEIGHT - 2, true);
+            oled.dot(enemyX + 2, enemyY + 4);
+            oled.dot(enemyX + ENEMY_WIDTH - 2, enemyY + 4);
+          }
+        }
+        
+        // Отрисовка пуль игрока
+        for (int i = 0; i < MAX_BULLETS; i++) {
+          if (_bullets[i].active) {
+            oled.line(_bullets[i].x, _bullets[i].y, _bullets[i].x, _bullets[i].y + BULLET_HEIGHT);
+          }
+        }
+        
+        if (_gamemode == GAMEMODE_EXTREME) {
+          for (int i = 0; i < MAX_ENEMY_BULLETS; i++) {
+            if (_enemy_bullets[i].active) {
+              oled.line(_enemy_bullets[i].x, _enemy_bullets[i].y, _enemy_bullets[i].x, _enemy_bullets[i].y + ENEMY_BULLET_HEIGHT);
+            }
+          }
+        }
+        
+        // Отрисовка игрока
+        int playerX = _player_x;
+        int playerY = DISPLAY_HEIGHT - PLAYER_HEIGHT;
+        oled.line(playerX + PLAYER_WIDTH/2, playerY, playerX, playerY + PLAYER_HEIGHT);
+        oled.line(playerX + PLAYER_WIDTH/2, playerY, playerX + PLAYER_WIDTH, playerY + PLAYER_HEIGHT);
+        oled.line(playerX, playerY + PLAYER_HEIGHT, playerX + PLAYER_WIDTH, playerY + PLAYER_HEIGHT);
+        oled.rect(playerX + 2, playerY + PLAYER_HEIGHT - 3, playerX + PLAYER_WIDTH - 2, playerY + PLAYER_HEIGHT, true);
+        
+        oled.update();
+
+        // Логика игры с фиксированным интервалом
+        if (millis() - _last_time <= 45) break;
+        _last_time = millis();
+
+        // Классический режим
+        if (_gamemode == GAMEMODE_CLASSIC) {
+          // Обновление пуль
+          for (int i = 0; i < MAX_BULLETS; i++) {
+            if (_bullets[i].active) {
+              _bullets[i].y -= 2;
+              if (_bullets[i].y < 0) _bullets[i].active = false;
+            }
+          }
+          
+          // Создание новых врагов
+          if (millis() - _enemy_spawn_time > 2000) {
+            for (int i = 0; i < MAX_ENEMIES; i++) {
+              if (!_enemies[i].active) {
+                _enemies[i].x = random(0, DISPLAY_WIDTH - ENEMY_WIDTH);
+                _enemies[i].y = 0;
+                _enemies[i].active = true;
+                _enemies[i].vx = (random(0, 2) ? 0 : (random(0, 2) * 2 - 1) * 0.3);
+                break;
+              }
+            }
+            _enemy_spawn_time = millis();
+          }
+          
+          // Обновление врагов
+          for (int i = 0; i < MAX_ENEMIES; i++) {
+            if (_enemies[i].active) {
+              _enemies[i].y += 0.5;
+              _enemies[i].x += _enemies[i].vx;
+              
+              if (_enemies[i].x <= 0 || _enemies[i].x + ENEMY_WIDTH >= DISPLAY_WIDTH) {
+                _enemies[i].vx = -_enemies[i].vx;
+              }
+              
+              if (_enemies[i].y > DISPLAY_HEIGHT) {
+                _enemies[i].active = false;
+                _lives--;
+                if (_lives <= 0) {
+                  _state = INVADERS_STATE_GAMEOVER;
+                  _game_over_time = millis();
+                }
+              }
+            }
+          }
+          
+          // Проверка столкновений
+          for (int i = 0; i < MAX_BULLETS; i++) {
+            if (_bullets[i].active) {
+              for (int j = 0; j < MAX_ENEMIES; j++) {
+                if (_enemies[j].active) {
+                  if (_bullets[i].x >= _enemies[j].x && 
+                      _bullets[i].x <= _enemies[j].x + ENEMY_WIDTH &&
+                      _bullets[i].y >= _enemies[j].y && 
+                      _bullets[i].y <= _enemies[j].y + ENEMY_HEIGHT) {
+                    _bullets[i].active = false;
+                    _enemies[j].active = false;
+                    _score += 10;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          
+          // Столкновение игрока с врагами
+          for (int i = 0; i < MAX_ENEMIES; i++) {
+            if (_enemies[i].active) {
+              if (_player_x + 2 < _enemies[i].x + ENEMY_WIDTH &&
+                  _player_x + PLAYER_WIDTH - 2 > _enemies[i].x &&
+                  DISPLAY_HEIGHT - PLAYER_HEIGHT < _enemies[i].y + ENEMY_HEIGHT &&
+                  DISPLAY_HEIGHT > _enemies[i].y) {
+                _enemies[i].active = false;
+                _lives--;
+                if (_lives <= 0) {
+                  _state = INVADERS_STATE_GAMEOVER;
+                  _game_over_time = millis();
+                }
+              }
+            }
+          }
+        } else {
+          // Экстремальный режим
+          for (int i = 0; i < MAX_BULLETS; i++) {
+            if (_bullets[i].active) {
+              _bullets[i].y -= 2;
+              if (_bullets[i].y < 0) _bullets[i].active = false;
+            }
+          }
+          
+          for (int i = 0; i < MAX_ENEMY_BULLETS; i++) {
+            if (_enemy_bullets[i].active) {
+              _enemy_bullets[i].y += 1.5;
+              if (_enemy_bullets[i].y >= DISPLAY_HEIGHT) _enemy_bullets[i].active = false;
+            }
+          }
+          
+          int activeEnemies = 0;
+          for (int i = 0; i < MAX_ENEMIES; i++) if (_enemies[i].active) activeEnemies++;
+          
+          if (activeEnemies < 5 && millis() - _enemy_spawn_time > 2000) {
+            for (int i = 0; i < MAX_ENEMIES; i++) {
+              if (!_enemies[i].active) {
+                _enemies[i].x = random(10, DISPLAY_WIDTH - ENEMY_WIDTH - 10);
+                _enemies[i].y = random(5, 15);
+                _enemies[i].active = true;
+                _enemies[i].last_shot_time = millis();
+                _enemies[i].vx = random(2) ? 0.3 : -0.3;
+                _enemies[i].vy = 0.02;
+                break;
+              }
+            }
+            _enemy_spawn_time = millis();
+          }
+          
+          for (int i = 0; i < MAX_ENEMIES; i++) {
+            if (_enemies[i].active) {
+              _enemies[i].x += _enemies[i].vx;
+              _enemies[i].y += _enemies[i].vy;
+              
+              if (_enemies[i].x <= 0 || _enemies[i].x + ENEMY_WIDTH >= DISPLAY_WIDTH) {
+                _enemies[i].vx = -_enemies[i].vx;
+              }
+              
+              if (_enemies[i].y + ENEMY_HEIGHT >= DISPLAY_HEIGHT) {
+                _enemies[i].active = false;
+                _score = max(0, _score - 100);
+              }
+              
+              // Стрельба врагов
+              if (random(100) < 1 && millis() - _enemies[i].last_shot_time > 2000) {
+                for (int j = 0; j < MAX_ENEMY_BULLETS; j++) {
+                  if (!_enemy_bullets[j].active) {
+                    _enemy_bullets[j].x = _enemies[i].x + ENEMY_WIDTH / 2;
+                    _enemy_bullets[j].y = _enemies[i].y + ENEMY_HEIGHT;
+                    _enemy_bullets[j].active = true;
+                    break;
+                  }
+                }
+                _enemies[i].last_shot_time = millis();
+              }
+            }
+          }
+          
+          // Проверка столкновений
+          for (int i = 0; i < MAX_BULLETS; i++) {
+            if (_bullets[i].active) {
+              for (int j = 0; i < MAX_ENEMIES; j++) {
+                if (_enemies[j].active) {
+                  if (_bullets[i].x >= _enemies[j].x && 
+                      _bullets[i].x <= _enemies[j].x + ENEMY_WIDTH &&
+                      _bullets[i].y >= _enemies[j].y && 
+                      _bullets[i].y <= _enemies[j].y + ENEMY_HEIGHT) {
+                    _bullets[i].active = false;
+                    _enemies[j].active = false;
+                    _score += 10;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          
+          for (int i = 0; i < MAX_ENEMY_BULLETS; i++) {
+            if (_enemy_bullets[i].active) {
+              if (_enemy_bullets[i].x >= _player_x && 
+                  _enemy_bullets[i].x <= _player_x + PLAYER_WIDTH &&
+                  _enemy_bullets[i].y >= DISPLAY_HEIGHT - PLAYER_HEIGHT &&
+                  _enemy_bullets[i].y <= DISPLAY_HEIGHT) {
+                _enemy_bullets[i].active = false;
+                _lives--;
+                if (_lives <= 0) {
+                  _state = INVADERS_STATE_GAMEOVER;
+                  _game_over_time = millis();
+                }
+              }
+            }
+          }
+          
+          for (int i = 0; i < MAX_ENEMIES; i++) {
+            if (_enemies[i].active) {
+              if (_player_x + 2 < _enemies[i].x + ENEMY_WIDTH &&
+                  _player_x + PLAYER_WIDTH - 2 > _enemies[i].x &&
+                  DISPLAY_HEIGHT - PLAYER_HEIGHT < _enemies[i].y + ENEMY_HEIGHT &&
+                  DISPLAY_HEIGHT > _enemies[i].y) {
+                _enemies[i].active = false;
+                _lives--;
+                if (_lives <= 0) {
+                  _state = INVADERS_STATE_GAMEOVER;
+                  _game_over_time = millis();
+                }
+              }
+            }
+          }
+        }
+        break;
+      }
+        
+      case INVADERS_STATE_GAMEOVER: {
+        if (!_game_over_anim && millis() - _game_over_time > 800) {
+          resetButtons();
+          oled.clear();
+          
+          for (int i = 0; i < MAX_STARS; i++) {
+            if (_stars[i].brightness == 0) oled.dot(_stars[i].x, _stars[i].y);
+            else if (_stars[i].brightness == 1) {
+              oled.dot(_stars[i].x, _stars[i].y);
+              oled.dot(_stars[i].x + 1, _stars[i].y);
+              oled.dot(_stars[i].x, _stars[i].y + 1);
+              oled.dot(_stars[i].x + 1, _stars[i].y + 1);
+            } else {
+              oled.rect(_stars[i].x, _stars[i].y, _stars[i].x + 1, _stars[i].y + 1, true);
+            }
+          }
+          
+          oled.setScale(2);
+          oled.setCursorXY((DISPLAY_WIDTH - 9*6) / 2, 10);
+          oled.print(F("GAME"));
+          oled.setCursorXY((DISPLAY_WIDTH - 8*6) / 2, 30);
+          oled.print(F("OVER"));
+          
+          oled.setScale(1);
+          oled.setCursorXY((DISPLAY_WIDTH - 8*6 - String(_score).length()*6) / 2, 50);
+          oled.print(F("Score: "));
+          oled.print(_score);
+          
+          oled.setCursor(10, 5);
+          oled.print(F("OK:RETRY  UP:EXIT"));
+          
+          oled.update();
+          _game_over_anim = true;
+        }
+        
+        if (_game_over_anim && (ok.isClick() || down.isClick())) {
+          _score = 0;
+          _lives = 3;
+          _player_x = (DISPLAY_WIDTH - PLAYER_WIDTH) / 2;
+          _game_over_anim = false;
+          _enemy_spawn_time = millis();
+          
+          for (int i = 0; i < MAX_BULLETS; i++) _bullets[i].active = false;
+          for (int i = 0; i < MAX_ENEMIES; i++) _enemies[i].active = false;
+          if (_gamemode == GAMEMODE_EXTREME) {
+            for (int i = 0; i < MAX_ENEMY_BULLETS; i++) _enemy_bullets[i].active = false;
+          }
+          
+          int initialEnemies = _gamemode == GAMEMODE_CLASSIC ? 3 : 5;
+          for (int i = 0; i < initialEnemies; i++) {
+            for (int j = 0; j < MAX_ENEMIES; j++) {
+              if (!_enemies[j].active) {
+                if (_gamemode == GAMEMODE_CLASSIC) {
+                  _enemies[j].x = random(0, DISPLAY_WIDTH - ENEMY_WIDTH);
+                  _enemies[j].y = 0;
+                  _enemies[j].active = true;
+                  _enemies[j].vx = (random(0, 2) ? 0 : (random(0, 2) * 2 - 1) * 0.3);
+                  _enemies[j].vy = 0;
+                } else {
+                  _enemies[j].x = random(10, DISPLAY_WIDTH - ENEMY_WIDTH - 10);
+                  _enemies[j].y = random(5, 15);
+                  _enemies[j].active = true;
+                  _enemies[j].last_shot_time = millis();
+                  _enemies[j].vx = random(2) ? 0.3 : -0.3;
+                  _enemies[j].vy = 0.02;
+                }
+                break;
+              }
+            }
+          }
+          
+          _state = INVADERS_STATE_PLAYING;
+        } else if (_game_over_anim && up.isClick()) {
+          _state = INVADERS_STATE_MENU;
+          _is_menu_rendered = false;
+        }
+        break;
+      }
+    }
+  }
+}
 void PlayDinosaurGame(void) {
   down.setTimeout(160);         // Настраиваем удобные таймауты удержания
   ok.setTimeout(160);
@@ -3194,7 +3823,7 @@ void mini_apps_menu() {
     { // Страница 2
       "Flappy Bird",
       "Арконоид",
-      "",
+      "Space Invaders",
       "<- Пред.стр",
       "",
       "Назад"
@@ -3274,7 +3903,7 @@ void mini_apps_menu() {
         switch(mini_apps_ptr) {
           case 0: flappyGame(); break;
           case 1: arkanoidGame(); break;
-          case 2: break;
+          case 2: spaceInvadersGame(); break;
           case 3: current_page--; mini_apps_ptr = 0; break; // Возврат на пред. страницу
           case 4: break;
           case 5: exit(); resetButtons(); return;
@@ -3402,14 +4031,95 @@ void networkSettings_sta() {
       }
   }
 }
+void auto_brightness_setting() {
+  settings_auto_bright = db[kk::auto_bright].toBool();
+  
+  while(true) {
+      oled.clear();
+      oled.setCursor(0, 0);
+      oled.print("Авто яркость:");
+      if (settings_auto_bright){
+        oled.print("Вкл");
+      } else {
+        oled.print("Выкл");
+      }
+      oled.setCursor(0, 4);
+      oled.print("OK - Вкл/Выкл");
+      oled.update();
+
+      buttons_tick();
+      
+      if(ok.isClick()) {
+        settings_auto_bright = !settings_auto_bright;
+      }
+      if(ok.isHold()) {
+        db[kk::auto_bright] = settings_auto_bright;
+        db.update(); 
+        exit(); return;
+      }
+  }
+}
+void settingDisplay() {
+  const char* settings_items[] = {
+    "Яркость",
+    "Авто яркость",
+    "Назад"
+  };
+  const uint8_t settings_apps_count = sizeof(settings_items)/sizeof(settings_items[0]);
+  int8_t settings_apps_ptr = 0;
+  const uint8_t header_height = 16; // Высота заголовка с линией
+
+  ui_rama("Настройки дисплея", true, true, true);
+  
+  while(true) {
+    // Очищаем только область меню (начиная с 3 строки)
+    oled.clear(0, header_height, 127, 63);
+    
+    // Рисуем только первый видимый пункт
+    oled.setCursor(2, header_height/8 + 0); // 3 строка (16px)
+    oled.print(settings_apps_ptr == 0 ? ">" : " ");
+    oled.print(settings_items[0]);
+
+    // Рисуем остальные пункты если есть
+    if(settings_apps_count > 1) {
+      for(uint8_t i = 1; i < settings_apps_count; i++) {
+        oled.setCursor(2, header_height/8 + i); // Следующие строки
+        oled.print(settings_apps_ptr == i ? ">" : " ");
+        oled.print(settings_items[i]);
+      }
+    }
+    
+    oled.update();
+
+    buttons_tick();
+
+    if(up.isClick() && settings_apps_ptr > 0) {
+      settings_apps_ptr--;
+    }
+    if(down.isClick() && settings_apps_ptr < settings_apps_count - 1) {
+      settings_apps_ptr++;
+    }
+
+    if(ok.isClick()) {
+      switch(settings_apps_ptr) {
+        case 0: brightnessAdjust(); break;
+        case 1: auto_brightness_setting(); break;
+        case 2: exit(false); return;
+      }
+      // Перерисовываем интерфейс после возврата
+      ui_rama("Настройки дисплея", true, true, true);
+    }
+
+  }
+}
 void settingsMenu() {
   const char* settings_items[] = {
-    "Яркость дисплея",
+    "Дисплей",
     "Сеть AP",
     "Сеть STA",
     "О прошивке",
     "Назад"
-};
+  };
   const uint8_t settings_apps_count = sizeof(settings_items)/sizeof(settings_items[0]);
   int8_t settings_apps_ptr = 0;
   const uint8_t header_height = 16; // Высота заголовка с линией
@@ -3447,7 +4157,7 @@ void settingsMenu() {
 
     if(ok.isClick()) {
       switch(settings_apps_ptr) {
-        case 0: brightnessAdjust(); break;
+        case 0: settingDisplay(); break;
         case 1: networkSettings_ap(); break;
         case 2: networkSettings_sta(); break;
         case 3: aboutFirmware(); break;
