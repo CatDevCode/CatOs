@@ -1,4 +1,4 @@
-#define FIRMWARE_VERSION "v0.1.3R"
+#define FIRMWARE_VERSION "v0.1.4R"
 // настройка дисплея
 #define RES 17
 #define DC 16
