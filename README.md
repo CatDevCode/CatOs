@@ -94,6 +94,7 @@ pio run --target upload
 ## Кредиты
 - Спасибо [Алексу Гайверу](https://github.com/GyverLibs/) за библиотеки ❤
 - Спасибо проекту [MicroReader](https://github.com/Nich1con/microReader/) за некоторые функции и игры.
+- Спасибо [x4m](https://github.com/x4m) в [pull request] (https://github.com/Nich1con/microReader/pull/11) за новый калькулятор
 - Спасибо VoltimeterXPayalnuk за игру Space Invaders (для i2c).
 ## Star History
 

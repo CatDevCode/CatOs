@@ -1835,113 +1835,158 @@ void choice_gpio() {
     }
   }
 }
-int64_t _pow(int64_t a, int64_t b) {
-  int64_t res = 1;
-  for (int i = 0; i < b; i++) {
-    res*=(int64_t)a;
-  }
-  return res;
-}
-int getdgts(int num) {
-  int res = 1;
-  int pow10 = 10;
-  while (num / pow10) {
-    pow10 *= 10;
-    res++;
-  }
-  if (num < 0) res++;
-  return res;
-}
-void redraw() {
-  oled.clear(); // чити
-  oled.home();  // домой
-  oled.setScale(1); // размер 1
-  oled.print("КАЛЬКУЛЯТОР");  // надпись
-  oled.setScale(0); // вернуть размер назад (костыль)
-  drawbattery();
-  oled.line(0, 10, 127, 10);   // Линия
-  oled.setCursor(0, 3); // сдвинуть
-  oled.setScale(2); // размер 2
-  if (thisval || isdraw) oled.print(a);
-  else for (int i = 0; i < getdgts(a); i++) oled.print(' ');
-  switch (sign) {
-    case 0: oled.print('+');  break;
-    case 1: oled.print('-');  break;
-    case 2: oled.print('*');  break;
-    case 3: oled.print('/');  break;
-    case 4: oled.print('^');  break;
-  }
-  if (!thisval || isdraw) oled.print(b);
-  else for (int i = 0; i < getdgts(b); i++) oled.print(' ');
-  oled.print('=');
-  oled.print(result);
+/* Написано Матвеем и Андреем Бородиными, потому что мы можем в Си. */
+// https://github.com/Nich1con/microReader/pull/11
+// https://github.com/x4m
+double display = 0;      // Число на экране
+double accumulator = 0;  // Аккумулятор для +, -, *, /
+int op = 0;              // Операции 1 +, 2 -, 3 *, 4 /
+int button_x = 0;        // Выбранная кнопка по горизонтали
+int button_y = 0;        // Выбранная кнопка по вертикали
+
+void drawDisplay() {
+  oled.clear();
+  // Число из display (может нарисовать и аккумулятор с операций? места на экране ещё полно)
+  oled.setCursor(1, 1);
+  oled.print(display);
+
+  // Рисуем клавиатуру
+  oled.setCursor(5, 3);
+  oled.print(F("C = + -"));
+  oled.setCursor(5, 4);
+  oled.print(F("1 2 3 *"));
+  oled.setCursor(5, 5);
+  oled.print(F("4 5 6 /"));
+  oled.setCursor(5, 6);
+  oled.print(F("7 8 9 0"));
+
+  oled.roundRect(3 + button_y * 12, 22 + button_x * 8, 13 + button_y * 12, 32 + button_x * 8, OLED_STROKE);
   oled.update();
 }
-void calcul() {
-  a = 0;
-  b = 0;
-  sign = 4;
-  result = 0;
-  thisval = 0;
-  redraw();
-  while (true) {
-    buttons_tick();
-    if (right.isClick()) {
-      oled.setScale(0);
-      exit();
-      return;
-    }
-    if (left.isClick()) {
-      switch (sign) {
-        case 0: result = (CALCUL_TYPE)a + b;         break;
-        case 1: result = (CALCUL_TYPE)a - b;         break;
-        case 2: result = (CALCUL_TYPE)a * b;         break;
-        case 3: result = (CALCUL_TYPE)a / (b != 0 ? b : 1); break;
-        case 4: result = _pow(a, b);                    break;
+
+void okButtonClick() {
+  // Ифы, ифчики, ифята
+  if (button_x == 0) {
+    if (button_y == 0) {
+      // C
+      display = 0;
+    } else if (button_y == 1) {
+      // =
+      if (op == 1) {
+        display = display + accumulator;
       }
-      redraw();
-    }
-    if (ok.isHold()) {
-      if (++thisval >= 2) {
-        thisval = 0;
+      if (op == 2) {
+        display = accumulator - display;
       }
+      if (op == 3) {
+        display = accumulator * display;
+      }
+      if (op == 4) {
+        display = accumulator / display;
+      }
+      op = 0;
+    } else if (button_y == 2) {
+      // +
+      accumulator = display;
+      display = 0;
+      op = 1;
+    } else if (button_y == 3) {
+      // -
+      accumulator = display;
+      display = 0;
+      op = 2;
     }
-    if (ok.isClick()) {
-      if (++sign >= 5) sign = 0;
-      redraw();
+  } else if (button_x == 1) {
+    if (button_y == 0) {
+      //1
+      display = display * 10 + 1;
+    } else if (button_y == 1) {
+      //2
+      display = display * 10 + 2;
+    } else if (button_y == 2) {
+      //3
+      display = display * 10 + 3;
+    } else if (button_y == 3) {
+      //*
+      accumulator = display;
+      display = 0;
+      op = 3;
     }
 
-    if (up.isClick()) {
-      if (thisval) b++;
-      else a++;
-      redraw();
+  } else if (button_x == 2) {
+    if (button_y == 0) {
+      //4
+      display = display * 10 + 4;
+    } else if (button_y == 1) {
+      //5
+      display = display * 10 + 5;
+    } else if (button_y == 2) {
+      //6
+      display = display * 10 + 6;
+    } else if (button_y == 3) {
+      // /
+      accumulator = display;
+      display = 0;
+      op = 4;
     }
-    if (down.isClick()) {
-      if (thisval) b--;
-      else a--;
-      redraw();
+
+  } else if (button_x == 3) {
+    if (button_y == 0) {
+      //7
+      display = display * 10 + 7;
+    } else if (button_y == 1) {
+      //8
+      display = display * 10 + 8;
+    } else if (button_y == 2) {
+      //9
+      display = display * 10 + 9;
+    } else if (button_y == 3) {
+      // 0
+      display = display * 10;
     }
-    if (up.isStep()) {
-      if (thisval) b += 10;
-      else a += 10;
-      redraw();
-    }
-    if (down.isStep()) {
-      if (thisval) b -= 5;
-      else a -= 5;
-      redraw();
-    }
-    static uint32_t tmr;
-    if (millis() - tmr >= 300) {
-      tmr = millis();
-      isdraw = !isdraw;
-      redraw();
-    }
-    yield();
   }
+  // Элсы, элсики, элсята
 }
 
+void calc(void) {
+  while (true) {
+    oled.clear();
+    oled.update();
+    drawDisplay();
+    while (true) {
+      buttons_tick();
+      
+      if (up.isClick()) {
+        button_x--;
+        if (button_x < 0) button_x = 3;
+      }
+      if (down.isClick()) {
+        button_x++;
+        if (button_x > 3) button_x = 0;
+      }
+      if (left.isClick()) {
+        button_y--;
+        if (button_y < 0) button_y = 3;
+      }
+      if (right.isClick()) {
+        button_y++;
+        if (button_y > 3) button_y = 0;
+      }
+      
+      if (ok.isClick()) {
+        okButtonClick();
+      }
 
+      if (ok.isHold()) {
+        exit();
+        return;
+      }
+
+      drawDisplay();
+      yield();
+    }
+  }
+}
 void test(void) {
   resetButtons();
   oled.clear();
@@ -3809,6 +3854,236 @@ void arkanoidGame() {
         delay(20);
     }
 }
+// mini 3d graphics
+#define DOOM_MAP_SIZE 8
+#define DOOM_FOV 60
+#define DOOM_MAX_STEPS 20
+#define DOOM_WALL_HEIGHT 1.0f
+
+const uint8_t wallTexture[] = {
+  0b11111111,
+  0b10000001,
+  0b10111101,
+  0b10111101,
+  0b10111101,
+  0b10111101,
+  0b10000001,
+  0b11111111
+};
+
+// 1 - стена, 0 - проход. можно сделать свою карту
+uint8_t doomMap[DOOM_MAP_SIZE][DOOM_MAP_SIZE] = {
+  {1,1,1,1,1,1,1,1},
+  {1,0,0,0,0,0,0,1},
+  {1,0,1,0,1,1,0,1},
+  {1,0,1,0,0,1,0,1},
+  {1,0,0,0,0,0,0,1},
+  {1,0,1,1,0,1,0,1},
+  {1,0,0,0,0,0,0,1},
+  {1,1,1,1,1,1,1,1}
+};
+
+float playerX = 1.5f;
+float playerY = 1.5f;
+float playerAngle = 0.0f;
+float moveSpeed = 0.1f;
+float rotSpeed = 0.05f;
+
+bool checkCollision(float x, float y) {
+  int mapX = (int)x;
+  int mapY = (int)y;
+  
+  if (mapX < 0 || mapX >= DOOM_MAP_SIZE || mapY < 0 || mapY >= DOOM_MAP_SIZE) 
+    return true;
+  
+  return doomMap[mapY][mapX] == 1;
+}
+
+// Raycasting 
+void castRay(float rayAngle, int column, float* wallDist, uint8_t* wallType) {
+  float rayDirX = cos(rayAngle);
+  float rayDirY = sin(rayAngle);
+  
+  float deltaDistX = fabs(1 / rayDirX);
+  float deltaDistY = fabs(1 / rayDirY);
+  
+  int mapX = (int)playerX;
+  int mapY = (int)playerY;
+  
+  float sideDistX, sideDistY;
+  int stepX, stepY;
+  
+  if (rayDirX < 0) {
+    stepX = -1;
+    sideDistX = (playerX - mapX) * deltaDistX;
+  } else {
+    stepX = 1;
+    sideDistX = (mapX + 1.0 - playerX) * deltaDistX;
+  }
+  
+  if (rayDirY < 0) {
+    stepY = -1;
+    sideDistY = (playerY - mapY) * deltaDistY;
+  } else {
+    stepY = 1;
+    sideDistY = (mapY + 1.0 - playerY) * deltaDistY;
+  }
+  
+  bool hit = false;
+  bool side; // false - X, true - Y
+  
+  for (int i = 0; i < DOOM_MAX_STEPS && !hit; i++) {
+    if (sideDistX < sideDistY) {
+      sideDistX += deltaDistX;
+      mapX += stepX;
+      side = false;
+    } else {
+      sideDistY += deltaDistY;
+      mapY += stepY;
+      side = true;
+    }
+    
+    if (mapX < 0 || mapX >= DOOM_MAP_SIZE || mapY < 0 || mapY >= DOOM_MAP_SIZE) 
+      break;
+      
+    if (doomMap[mapY][mapX] == 1) {
+      hit = true;
+    }
+  }
+  
+  if (hit) {
+    if (!side) {
+      *wallDist = (mapX - playerX + (1 - stepX) / 2) / rayDirX;
+    } else {
+      *wallDist = (mapY - playerY + (1 - stepY) / 2) / rayDirY;
+    }
+    *wallType = side ? 2 : 1;
+  } else {
+    *wallDist = -1;
+  }
+}
+
+// Рендер 
+void renderDoomScene() {
+  oled.clear();
+  
+  //пол и потолок
+  oled.rect(0, 32, 127, 63, OLED_FILL); //пол
+  oled.rect(0, 0, 127, 31, OLED_CLEAR); //потолок
+  
+  // Raycasting
+  for (int x = 0; x < 128; x++) {
+    float cameraX = 2 * x / 127.0f - 1;
+    float rayAngle = playerAngle + atan(cameraX * tan(DOOM_FOV * 3.14159 / 360));
+    
+    float wallDist;
+    uint8_t wallType;
+    castRay(rayAngle, x, &wallDist, &wallType);
+    
+    if (wallDist > 0) {
+      int lineHeight = (int)(64 / wallDist);
+      if (lineHeight > 64) lineHeight = 64;
+      
+      int drawStart = (64 - lineHeight) / 2;
+      int drawEnd = drawStart + lineHeight;
+      
+      for (int y = drawStart; y < drawEnd; y++) {
+        if (y >= 0 && y < 64) {
+          //чередование пикселей
+          if ((x + y) % (wallType + 1) == 0) {
+            oled.dot(x, y);
+          }
+        }
+      }
+    }
+  }
+  
+  // миникарта
+  int miniMapSize = 32;
+  int miniMapX = 96;
+  int miniMapY = 0;
+  
+  for (int y = 0; y < DOOM_MAP_SIZE; y++) {
+    for (int x = 0; x < DOOM_MAP_SIZE; x++) {
+      if (doomMap[y][x] == 1) {
+        oled.rect(miniMapX + x * 4, miniMapY + y * 4, 
+                 miniMapX + x * 4 + 3, miniMapY + y * 4 + 3);
+      }
+    }
+  }
+  
+  //игрок на миникарте
+  int playerMapX = miniMapX + (int)(playerX * 4);
+  int playerMapY = miniMapY + (int)(playerY * 4);
+  oled.rect(playerMapX - 1, playerMapY - 1, playerMapX + 1, playerMapY + 1, OLED_FILL);
+
+  int lookX = playerMapX + cos(playerAngle) * 6;
+  int lookY = playerMapY + sin(playerAngle) * 6;
+  oled.line(playerMapX, playerMapY, lookX, lookY);
+  
+  oled.update();
+}
+
+// main функция игры
+void miniDoomGame() {
+  resetButtons();
+  playerX = 1.5f;
+  playerY = 1.5f;
+  playerAngle = 0.0f;
+  
+  //настройка кнопок
+  up.setStepTimeout(50);
+  down.setStepTimeout(50);
+  left.setStepTimeout(80);
+  right.setStepTimeout(80);
+  
+  while (true) {
+    buttons_tick();
+    
+    //движение
+    if (up.isPress() || up.isStep()) {
+      float newX = playerX + cos(playerAngle) * moveSpeed;
+      float newY = playerY + sin(playerAngle) * moveSpeed;
+      
+      if (!checkCollision(newX, playerY)) playerX = newX;
+      if (!checkCollision(playerX, newY)) playerY = newY;
+    }
+    
+    if (down.isPress() || down.isStep()) {
+      float newX = playerX - cos(playerAngle) * moveSpeed;
+      float newY = playerY - sin(playerAngle) * moveSpeed;
+      
+      if (!checkCollision(newX, playerY)) playerX = newX;
+      if (!checkCollision(playerX, newY)) playerY = newY;
+    }
+    
+    if (left.isPress() || left.isStep()) {
+      playerAngle -= rotSpeed;
+    }
+    
+    if (right.isPress() || right.isStep()) {
+      playerAngle += rotSpeed;
+    }
+    
+    while (playerAngle < 0) playerAngle += 2 * 3.14159;
+    while (playerAngle >= 2 * 3.14159) playerAngle -= 2 * 3.14159;
+    
+    //рендеринг
+    renderDoomScene();
+    
+    //выход
+    if (ok.isHold()) {
+      up.setStepTimeout(400);
+      down.setStepTimeout(400);
+      left.setStepTimeout(400);
+      right.setStepTimeout(400);
+      exit(false);
+      return;
+    }
+    //для стабильности
+    delay(30); 
+  }
+}
 void mini_apps_menu() {
   setCpuFrequencyMhz(240);
   const char* mini_apps_pages[][6] = {
@@ -3824,9 +4099,9 @@ void mini_apps_menu() {
       "Flappy Bird",
       "Арконоид",
       "Space Invaders",
-      "<- Пред.стр",
+      "Mini 3d graphics",
       "",
-      "Назад"
+      "<- Пред.стр"
     }
   };
   
@@ -3904,9 +4179,9 @@ void mini_apps_menu() {
           case 0: flappyGame(); break;
           case 1: arkanoidGame(); break;
           case 2: spaceInvadersGame(); break;
-          case 3: current_page--; mini_apps_ptr = 0; break; // Возврат на пред. страницу
+          case 3: miniDoomGame(); break;
           case 4: break;
-          case 5: exit(); resetButtons(); return;
+          case 5: current_page--; mini_apps_ptr = 0; break;
         }
       }
       
@@ -3945,7 +4220,7 @@ void networkSettings_ap() {
       }
   }
 }
-// Регулировка яркости
+//регулировка яркости
 void brightnessAdjust() {
   int brightness = db[kk::OLED_BRIGHTNESS].toInt();
   
@@ -4256,7 +4531,7 @@ void menu_default() {
         case 0: mini_apps_menu(); break;  // По нажатию на ОК при наведении на 0й пункт вызвать функцию
         case 1: settingsMenu(); break;
         case 2: ShowFilesLittleFS(); break;
-        case 3: calcul(); break;
+        case 3: calc(); break;
         case 4: create_settings(); break;
         case 5: Utilities_menu(); break;
       }
